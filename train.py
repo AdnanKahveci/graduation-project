@@ -101,16 +101,20 @@ def train(args, model, optimizer):
     n_bins = 2.0 ** args.n_bits
 
     z_sample = []
-    # Z vektörlerinin şekillerini hesaplar
     z_shapes = calc_z_shapes(3, args.img_size, args.n_flow, args.n_block)
     for z in z_shapes:
         z_new = torch.randn(args.n_sample, *z) * args.temp
         z_sample.append(z_new.to(device))
 
-    # İterasyonlar boyunca modeli eğitir ve ilerleme çubuğu gösterir
+    # Validation seti için
+    val_dataset = iter(sample_data(args.path, args.batch, args.img_size))
+    
+    best_val_loss = float('inf')
+    patience = 5000  # Erken durdurma için sabır
+    no_improvement = 0
+
     with tqdm(range(args.iter)) as pbar:
         for i in pbar:
-            # Veriyi yükler ve normalize eder
             image, _ = next(dataset)
             image = image.to(device)
             image = image * 255
@@ -122,31 +126,33 @@ def train(args, model, optimizer):
 
             if i == 0:
                 with torch.no_grad():
-                    log_p, logdet, _ = model.module(
-                        image + torch.rand_like(image) / n_bins
-                    )
+                    log_p, logdet, _ = model.module(image + torch.rand_like(image) / n_bins)
                     continue
             else:
                 log_p, logdet, _ = model(image + torch.rand_like(image) / n_bins)
 
             logdet = logdet.mean()
 
-            # Kayıp hesaplama ve geri yayılım (backpropagation) işlemi
             loss, log_p, log_det = calc_loss(log_p, logdet, args.img_size, n_bins)
             model.zero_grad()
             loss.backward()
 
-            # Öğrenme oranını günceller
-            warmup_lr = args.lr
-            optimizer.param_groups[0]["lr"] = warmup_lr
+            # Öğrenme oranı planlaması
+            if i % 50000 == 0 and i > 0:
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] *= 0.5
+
+            warmup_lr = optimizer.param_groups[0]['lr']
             optimizer.step()
 
-            # İlerleme çubuğunda güncel kayıp ve öğrenme oranı bilgilerini gösterir
             pbar.set_description(
                 f"Loss: {loss.item():.5f}; logP: {log_p.item():.5f}; logdet: {log_det.item():.5f}; lr: {warmup_lr:.7f}"
             )
 
-            # Belirli aralıklarla örnekleri kaydeder
+            if i % 1000 == 0:  # Daha sık checkpoint
+                torch.save(model.state_dict(), f"checkpoint/model_{str(i + 1).zfill(6)}.pt")
+                torch.save(optimizer.state_dict(), f"checkpoint/optim_{str(i + 1).zfill(6)}.pt")
+
             if i % 100 == 0:
                 with torch.no_grad():
                     utils.save_image(
@@ -154,32 +160,52 @@ def train(args, model, optimizer):
                         f"sample/{str(i + 1).zfill(6)}.png",
                         normalize=True,
                         nrow=10,
-                        value_range=(-0.5, 0.5),  # 'range' yerine 'value_range' kullanıldı
+                        value_range=(-0.5, 0.5),
                     )
 
-            # Her 10.000 iterasyonda modeli kaydeder
-            if i % 10000 == 0:
-                torch.save(
-                    model.state_dict(), f"checkpoint/model_{str(i + 1).zfill(6)}.pt"
-                )
-                torch.save(
-                    optimizer.state_dict(), f"checkpoint/optim_{str(i + 1).zfill(6)}.pt"
-                )
+            # Validation ve erken durdurma
+            if i % 1000 == 0:
+                model.eval()
+                with torch.no_grad():
+                    val_image, _ = next(val_dataset)
+                    val_image = val_image.to(device)
+                    val_image = val_image * 255
+                    if args.n_bits < 8:
+                        val_image = torch.floor(val_image / 2 ** (8 - args.n_bits))
+                    val_image = val_image / n_bins - 0.5
+                    val_log_p, val_logdet, _ = model(val_image + torch.rand_like(val_image) / n_bins)
+                    val_loss, _, _ = calc_loss(val_log_p, val_logdet, args.img_size, n_bins)
+                
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    no_improvement = 0
+                    torch.save(model.state_dict(), "checkpoint/best_model.pt")
+                else:
+                    no_improvement += 1
+                
+                if no_improvement >= patience:
+                    print(f"Early stopping at iteration {i}")
+                    break
+                
+                model.train()
 
-# Ana fonksiyon: Komut satırından alınan argümanlarla modeli başlatır ve eğitir
+            # Düzenli değerlendirme
+            if i % 10000 == 0:
+                print(f"\nIteration {i}: Detailed Evaluation")
+                print(f"Training Loss: {loss.item():.5f}")
+                print(f"Validation Loss: {val_loss.item():.5f}")
+                print(f"Best Validation Loss: {best_val_loss:.5f}")
+                print(f"Learning Rate: {warmup_lr:.7f}")
+
 if __name__ == "__main__":
     args = parser.parse_args()
     print(args)
 
-    # Glow modelini başlatır
-    model_single = Glow(
-        3, args.n_flow, args.n_block, affine=args.affine, conv_lu=not args.no_lu
-    )
+    model_single = Glow(3, args.n_flow, args.n_block, affine=args.affine, conv_lu=not args.no_lu)
     model = nn.DataParallel(model_single)
     model = model.to(device)
 
-    # Optimizasyon işlemi için Adam kullanılır
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-    # Eğitim işlemi başlatılır
     train(args, model, optimizer)
+
