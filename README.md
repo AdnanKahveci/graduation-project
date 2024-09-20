@@ -19,10 +19,10 @@ Aşağıdaki komut ile gerekli Python paketlerini yükleyebilirsiniz:
 pip install torch torchvision tqdm Pillow
 ```
 # Proje Dosyaları
-- train.py: Modeli eğitmek için kullanılan ana dosya.
-- model.py: Glow modelinin tanımlandığı dosya.
-- sample/: Eğitim sırasında üretilen örneklerin kaydedileceği dizin.
-- checkpoint/: Model ve optimizasyon parametrelerinin kaydedileceği dizin.
+- `train.py`: Modeli eğitmek için kullanılan ana dosya.
+- `model.py`: Glow modelinin tanımlandığı dosya.
+- `sample/`: Eğitim sırasında üretilen örneklerin kaydedileceği dizin.
+- `checkpoint/`: Model ve optimizasyon parametrelerinin kaydedileceği dizin.
 
 # Kullanım
 Glow modelini eğitmek için aşağıdaki adımları izleyin:
