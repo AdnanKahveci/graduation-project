@@ -2,7 +2,7 @@ from tqdm import tqdm
 import numpy as np
 from PIL import Image
 from math import log, sqrt, pi
-
+import os
 import argparse
 
 import torch
@@ -113,7 +113,23 @@ def train(args, model, optimizer):
     patience = 5000  # Erken durdurma için sabır
     no_improvement = 0
 
-    with tqdm(range(args.iter)) as pbar:
+    # Eğitim başlangıcı için iterasyon kontrolü
+    start_iter = 0
+
+    # Eğer bir checkpoint varsa modeli ve optimizer'ı o noktadan yükleyin
+    checkpoint_path = "checkpoint/checkpoint_latest.pth"  # Son kaydedilen checkpoint'i yükleme
+    if os.path.isfile(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_iter = checkpoint['iteration']  # Eğitime kaldığınız iterasyondan devam
+        best_val_loss = checkpoint['best_val_loss']
+        no_improvement = checkpoint['no_improvement']
+        print(f"Checkpoint yükleniyor, iterasyon: {start_iter}")
+    else:
+        print("Checkpoint bulunamadı, sıfırdan başlanıyor.")
+
+    with tqdm(range(start_iter, args.iter)) as pbar:
         for i in pbar:
             image, _ = next(dataset)
             image = image.to(device)
@@ -149,9 +165,15 @@ def train(args, model, optimizer):
                 f"Loss: {loss.item():.5f}; logP: {log_p.item():.5f}; logdet: {log_det.item():.5f}; lr: {warmup_lr:.7f}"
             )
 
-            if i % 1000 == 0:  # Daha sık checkpoint
-                torch.save(model.state_dict(), f"checkpoint/model_{str(i + 1).zfill(6)}.pt")
-                torch.save(optimizer.state_dict(), f"checkpoint/optim_{str(i + 1).zfill(6)}.pt")
+            # Model ve optimizer durumunu kaydetme (daha sık checkpoint)
+            if i % 1000 == 0:
+                torch.save({
+                    'iteration': i,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'best_val_loss': best_val_loss,
+                    'no_improvement': no_improvement
+                }, f"checkpoint/checkpoint_latest.pth")
 
             if i % 100 == 0:
                 with torch.no_grad():
@@ -208,4 +230,3 @@ if __name__ == "__main__":
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     train(args, model, optimizer)
-
