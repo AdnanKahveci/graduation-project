@@ -166,7 +166,7 @@ def train(args, model, optimizer):
             )
 
             # Model ve optimizer durumunu kaydetme (daha sık checkpoint)
-            if i % 1000 == 0:
+            if i % 100 == 0:
                 torch.save({
                     'iteration': i,
                     'model_state_dict': model.state_dict(),
@@ -212,7 +212,7 @@ def train(args, model, optimizer):
                 model.train()
 
             # Düzenli değerlendirme
-            if i % 10000 == 0:
+            if i % 5000 == 0:
                 print(f"\nIteration {i}: Detailed Evaluation")
                 print(f"Training Loss: {loss.item():.5f}")
                 print(f"Validation Loss: {val_loss.item():.5f}")
