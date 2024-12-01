@@ -1,8 +1,10 @@
 import os
 from torchvision import datasets, transforms
-from torch.utils.data import DataLoader, Dataset, ConcatDataset
+from torch.utils.data import DataLoader, Dataset, ConcatDataset, random_split
 from PIL import Image
 import torch
+import numpy as np
+import random
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # HAM10000 ve üretilmiş veri yolu
@@ -41,7 +43,16 @@ generated_dataset = CustomImageDataset(generated_data_path, label=1, transform=t
 
 # Veri kümelerini birleştirme
 combined_dataset = ConcatDataset([ham_dataset, generated_dataset])
-combined_loader = DataLoader(combined_dataset, batch_size=32, shuffle=True)
+
+# Eğitim ve test verilerine ayırma (80% eğitim, 20% test)
+train_size = int(0.8 * len(combined_dataset))
+test_size = len(combined_dataset) - train_size
+train_dataset, test_dataset = random_split(combined_dataset, [train_size, test_size])
+
+# DataLoader'ları oluşturma
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+
 import torch.nn as nn
 import torch.optim as optim
 
@@ -75,7 +86,7 @@ optimizer = optim.Adam(model.parameters(), lr=0.001)
 num_epochs = 10
 for epoch in range(num_epochs):
     running_loss = 0.0
-    for inputs, labels in combined_loader:
+    for inputs, labels in train_loader:
         inputs, labels = inputs.to(device), labels.to(device)
 
         # İleri + geri + optimizasyon
@@ -86,7 +97,7 @@ for epoch in range(num_epochs):
         optimizer.step()
 
         running_loss += loss.item()
-    print(f"Epoch {epoch+1}, Loss: {running_loss/len(combined_loader)}")
+    print(f"Epoch {epoch+1}, Loss: {running_loss/len(train_loader)}")
 
 print("Eğitim tamamlandı.")
 
@@ -95,13 +106,13 @@ import numpy as np
 from sklearn.metrics import confusion_matrix, accuracy_score
 import seaborn as sns
 
-# Tahminleri ve etiketleri toplama
+# Test kümesindeki tahminleri ve etiketleri toplama
 true_labels = []
 pred_labels = []
 
 model.eval()
 with torch.no_grad():
-    for inputs, labels in combined_loader:
+    for inputs, labels in test_loader:
         inputs, labels = inputs.to(device), labels.to(device)
         outputs = model(inputs)
         _, preds = torch.max(outputs, 1)
