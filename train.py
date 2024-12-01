@@ -1,3 +1,4 @@
+from matplotlib import pyplot as plt
 from tqdm import tqdm
 import numpy as np
 from PIL import Image
@@ -129,6 +130,10 @@ def train(args, model, optimizer):
     else:
         print("Checkpoint bulunamadı, sıfırdan başlanıyor.")
 
+    
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=50000, eta_min=1e-6)
+    validation_losses = []
+
     with tqdm(range(start_iter, args.iter)) as pbar:
         for i in pbar:
             image, _ = next(dataset)
@@ -153,14 +158,12 @@ def train(args, model, optimizer):
             model.zero_grad()
             loss.backward()
 
-            # Öğrenme oranı planlaması
-            if i % 50000 == 0 and i > 0:
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] *= 0.5
-
-            warmup_lr = optimizer.param_groups[0]['lr']
             optimizer.step()
 
+            # Öğrenme oranı planlaması
+            scheduler.step()
+
+            warmup_lr = scheduler.get_last_lr()[0]
             pbar.set_description(
                 f"Loss: {loss.item():.5f}; logP: {log_p.item():.5f}; logdet: {log_det.item():.5f}; lr: {warmup_lr:.7f}"
             )
@@ -184,7 +187,6 @@ def train(args, model, optimizer):
                         nrow=10,
                         value_range=(-0.5, 0.5),
                     )
-
             # Validation ve erken durdurma
             if i % 1000 == 0:
                 model.eval()
@@ -197,7 +199,18 @@ def train(args, model, optimizer):
                     val_image = val_image / n_bins - 0.5
                     val_log_p, val_logdet, _ = model(val_image + torch.rand_like(val_image) / n_bins)
                     val_loss, _, _ = calc_loss(val_log_p, val_logdet, args.img_size, n_bins)
-                
+
+                    validation_losses.append(val_loss.item())
+
+                    print(f"Validation Loss at Iteration {i}: {val_loss.item():.5f}")
+
+                    plt.plot(validation_losses, label='Validation Loss')
+                    plt.xlabel('Validation Checkpoints')
+                    plt.ylabel('Loss')
+                    plt.legend()
+                    plt.savefig(f'training_plots/validation_loss_plot_{i}.png')  # İterasyona göre farklı dosya adı
+                    plt.close()
+
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
                     no_improvement = 0
