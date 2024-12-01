@@ -45,14 +45,17 @@ def generate_images(args):
 
     # Görüntüleri üretme
     with torch.no_grad():
-        generated_images = model_single.reverse(z_sample).cpu()
-        utils.save_image(
-            generated_images,
-            f"{args.output_dir}/sample.png",
-            normalize=True,
-            nrow=10,
-            value_range=(-0.5, 0.5),
-        )
+       
+        for temp in [0.5, 0.7, 1.0]:
+            z_sample_temp = [z * temp for z in z_sample]
+            generated_images = model_single.reverse(z_sample_temp).cpu().data
+            utils.save_image(
+                generated_images,
+                 f"sample/temp_{temp}.png",
+                normalize=True,
+                nrow=10,
+                value_range=(-0.5, 0.5),
+            )
     print(f"Görüntüler {args.output_dir} dizinine kaydedildi.")
 
 if __name__ == "__main__":
