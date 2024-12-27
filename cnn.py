@@ -1,133 +1,163 @@
 import os
-from torchvision import datasets, transforms
-from torch.utils.data import DataLoader, Dataset, ConcatDataset, random_split
-from PIL import Image
 import torch
-import numpy as np
-import random
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# HAM10000 ve üretilmiş veri yolu
-ham_data_path = "ham10000/HAM10000_images_part_1"
-generated_data_path = "sample"
-
-# Veriyi dönüştürme işlemleri
-transform = transforms.Compose([
-    transforms.Resize((64, 64)),  # Görüntü boyutlarını Glow modeline uyacak şekilde ayarlayın
-    transforms.ToTensor()
-])
-
-# Özel veri kümesi sınıfı, görüntüleri yükler ve dönüşümlerini yapar
-class CustomImageDataset(Dataset):
-    def __init__(self, image_folder, label, transform=None):
-        self.image_folder = image_folder
-        self.transform = transform
-        self.label = label
-        self.image_files = [os.path.join(image_folder, file) for file in os.listdir(image_folder)]
-
-    def __len__(self):
-        return len(self.image_files)
-
-    def __getitem__(self, idx):
-        img_path = self.image_files[idx]
-        image = Image.open(img_path).convert('RGB')
-        if self.transform:
-            image = self.transform(image)
-        return image, self.label
-
-# Orijinal HAM10000 veri kümesi (label 0)
-ham_dataset = CustomImageDataset(ham_data_path, label=0, transform=transform)
-
-# Üretilen görüntüler veri kümesi (label 1)
-generated_dataset = CustomImageDataset(generated_data_path, label=1, transform=transform)
-
-# Veri kümelerini birleştirme
-combined_dataset = ConcatDataset([ham_dataset, generated_dataset])
-
-# Eğitim ve test verilerine ayırma (80% eğitim, 20% test)
-train_size = int(0.8 * len(combined_dataset))
-test_size = len(combined_dataset) - train_size
-train_dataset, test_dataset = random_split(combined_dataset, [train_size, test_size])
-
-# DataLoader'ları oluşturma
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-
 import torch.nn as nn
 import torch.optim as optim
-
-# Basit CNN modeli tanımlama
-class SimpleCNN(nn.Module):
-    def __init__(self):
-        super(SimpleCNN, self).__init__()
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
-        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
-        self.fc1 = nn.Linear(128 * 8 * 8, 256)
-        self.fc2 = nn.Linear(256, 2)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        x = self.pool(self.relu(self.conv1(x)))
-        x = self.pool(self.relu(self.conv2(x)))
-        x = self.pool(self.relu(self.conv3(x)))
-        x = x.view(-1, 128 * 8 * 8)
-        x = self.relu(self.fc1(x))
-        x = self.fc2(x)
-        return x
-
-# Modeli, kaybı ve optimizasyonu tanımlama
-model = SimpleCNN().to(device)
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-
-# Eğitim döngüsü
-num_epochs = 10
-for epoch in range(num_epochs):
-    running_loss = 0.0
-    for inputs, labels in train_loader:
-        inputs, labels = inputs.to(device), labels.to(device)
-
-        # İleri + geri + optimizasyon
-        optimizer.zero_grad()
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
-
-        running_loss += loss.item()
-    print(f"Epoch {epoch+1}, Loss: {running_loss/len(train_loader)}")
-
-print("Eğitim tamamlandı.")
-
+from torch.utils.data import DataLoader, random_split, Dataset
+from torchvision import transforms, models
+from PIL import Image
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.metrics import confusion_matrix, accuracy_score
-import seaborn as sns
+import multiprocessing
+from multiprocessing import freeze_support
 
-# Test kümesindeki tahminleri ve etiketleri toplama
-true_labels = []
-pred_labels = []
+# Define paths
+DATASET_DIR = "HAM10000_organized"
+INPUT_IMAGE_PATH = "sample/temp_1.0.png"
 
-model.eval()
-with torch.no_grad():
-    for inputs, labels in test_loader:
-        inputs, labels = inputs.to(device), labels.to(device)
-        outputs = model(inputs)
-        _, preds = torch.max(outputs, 1)
-        true_labels.extend(labels.cpu().numpy())
-        pred_labels.extend(preds.cpu().numpy())
+# Custom Dataset class
+class HAM10000Dataset(Dataset):
+    def __init__(self, root_dir, transform=None):
+        self.samples = []
+        self.transform = transform
+        for class_name in os.listdir(root_dir):
+            class_dir = os.path.join(root_dir, class_name)
+            if os.path.isdir(class_dir):
+                for img_name in os.listdir(class_dir):
+                    img_path = os.path.join(class_dir, img_name)
+                    self.samples.append((img_path, class_name))
+        self.class_to_idx = {cls_name: idx for idx, cls_name in enumerate(sorted(os.listdir(root_dir)))}
 
-# Doğruluk ve karışıklık matrisi
-accuracy = accuracy_score(true_labels, pred_labels)
-conf_matrix = confusion_matrix(true_labels, pred_labels)
+    def __len__(self):
+        return len(self.samples)
 
-print(f"Doğruluk: {accuracy*100:.2f}%")
+    def __getitem__(self, idx):
+        img_path, class_name = self.samples[idx]
+        image = Image.open(img_path).convert('RGB')
+        label = self.class_to_idx[class_name]
+        if self.transform:
+            image = self.transform(image)
+        return image, label
 
-# Karışıklık matrisini görselleştirme
-sns.heatmap(conf_matrix, annot=True, fmt="d", cmap="Blues", xticklabels=['HAM10000', 'Generated'], yticklabels=['HAM10000', 'Generated'])
-plt.xlabel("Tahmin Edilen")
-plt.ylabel("Gerçek")
-plt.title("Karışıklık Matrisi")
-plt.show()
+def train_model(model, criterion, optimizer, dataloaders, device, num_epochs=10):
+    best_model_wts = model.state_dict()
+    best_acc = 0.0
+
+    for epoch in range(num_epochs):
+        print(f'Epoch {epoch + 1}/{num_epochs}')
+        print('-' * 10)
+
+        for phase in ['train', 'val']:
+            if phase == 'train':
+                model.train()
+            else:
+                model.eval()
+
+            running_loss = 0.0
+            running_corrects = 0
+
+            for inputs, labels in dataloaders[phase]:
+                inputs, labels = inputs.to(device), labels.to(device)
+
+                optimizer.zero_grad()
+
+                with torch.set_grad_enabled(phase == 'train'):
+                    outputs = model(inputs)
+                    _, preds = torch.max(outputs, 1)
+                    loss = criterion(outputs, labels)
+
+                    if phase == 'train':
+                        loss.backward()
+                        optimizer.step()
+
+                running_loss += loss.item() * inputs.size(0)
+                running_corrects += torch.sum(preds == labels.data)
+
+            epoch_loss = running_loss / len(dataloaders[phase].dataset)
+            epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
+
+            print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
+
+            if phase == 'val' and epoch_acc > best_acc:
+                best_acc = epoch_acc
+                best_model_wts = model.state_dict()
+
+    model.load_state_dict(best_model_wts)
+    return model
+
+def main():
+    # Check for GPU
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    # Data transforms
+    data_transforms = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+
+    # Load dataset
+    dataset = HAM10000Dataset(DATASET_DIR, transform=data_transforms)
+
+    # Split dataset
+    train_size = int(0.8 * len(dataset))
+    val_size = len(dataset) - train_size
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+
+    # Create dataloaders with num_workers
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=32, 
+        shuffle=True, 
+        num_workers=multiprocessing.cpu_count(),
+        pin_memory=True if torch.cuda.is_available() else False
+    )
+    
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=32, 
+        shuffle=False, 
+        num_workers=multiprocessing.cpu_count(),
+        pin_memory=True if torch.cuda.is_available() else False
+    )
+    
+    dataloaders = {'train': train_loader, 'val': val_loader}
+    class_names = list(dataset.class_to_idx.keys())
+
+    # Define the model
+    model = models.resnet18(pretrained=True)
+    num_ftrs = model.fc.in_features
+    model.fc = nn.Linear(num_ftrs, len(class_names))
+    model = model.to(device)
+
+    # Loss function and optimizer
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+    # Train the model
+    print("Starting training...")
+    model = train_model(model, criterion, optimizer, dataloaders, device, num_epochs=5)
+
+    # Save the model
+    torch.save(model.state_dict(), "ham10000_cnn.pth")
+
+    # Prediction and visualization
+    image = Image.open(INPUT_IMAGE_PATH).convert('RGB')
+    transform = data_transforms
+    image_tensor = transform(image).unsqueeze(0).to(device)
+
+    model.eval()
+    with torch.no_grad():
+        outputs = model(image_tensor)
+        probabilities = torch.nn.functional.softmax(outputs[0], dim=0)
+        top_prob, top_class = torch.max(probabilities, 0)
+
+    plt.bar(class_names, probabilities.cpu().numpy())
+    plt.title(f'Predicted: {class_names[top_class]} ({top_prob.item() * 100:.2f}%)')
+    plt.xticks(rotation=45)
+    plt.ylabel('Probability')
+    plt.show()
+
+if __name__ == '__main__':
+    freeze_support()
+    main()
