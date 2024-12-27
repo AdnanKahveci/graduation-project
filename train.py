@@ -111,7 +111,7 @@ def train(args, model, optimizer):
     val_dataset = iter(sample_data(args.path, args.batch, args.img_size))
     
     best_val_loss = float('inf')
-    patience = 5000  # Erken durdurma için sabır
+    patience = 2000    # Erken durdurma için sabır
     no_improvement = 0
 
     # Eğitim başlangıcı için iterasyon kontrolü
@@ -131,7 +131,7 @@ def train(args, model, optimizer):
         print("Checkpoint bulunamadı, sıfırdan başlanıyor.")
 
     
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=50000, eta_min=1e-6)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20000, eta_min=1e-6)
     validation_losses = []
 
     with tqdm(range(start_iter, args.iter)) as pbar:
