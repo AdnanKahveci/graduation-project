@@ -14,7 +14,7 @@ parser.add_argument("--no_lu", action="store_true", help="use plain convolution 
 parser.add_argument("--affine", action="store_true", help="use affine coupling instead of additive")
 parser.add_argument("--img_size", default=64, type=int, help="image size")
 parser.add_argument("--temp", default=0.7, type=float, help="temperature of sampling")
-parser.add_argument("--n_sample", default=20, type=int, help="number of samples to generate")
+parser.add_argument("--n_sample", default=1, type=int, help="number of samples to generate")
 parser.add_argument("--model_path", type=str, default="checkpoint/best_model.pt", help="path to the trained model checkpoint")
 parser.add_argument("--output_dir", type=str, default="sample", help="directory to save generated images")
 
